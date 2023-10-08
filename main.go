@@ -30,6 +30,14 @@ func getDB() *sql.DB {
 	if err != nil {
 		log.Fatalf("Failed to create table: %v", err)
 	}
+	_, err = db.Exec("CREATE INDEX IF NOT EXISTS group_index ON events(\"group\")")
+	if err != nil {
+		log.Fatalf("Failed to create index: %v", err)
+	}
+	_, err = db.Exec("CREATE INDEX IF NOT EXISTS stream_index ON events(stream)")
+	if err != nil {
+		log.Fatalf("Failed to create index: %v", err)
+	}
 	return db
 }
 
@@ -47,8 +55,52 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
-		if group == "" || stream == "" {
-			http.Error(w, "Invalid Request", http.StatusBadRequest)
+		if group == "" {
+			// get all groups
+			rows, err := db.Query("SELECT DISTINCT \"group\" FROM events")
+			if err != nil {
+				log.Fatalf("Failed to execute statement: %v", err)
+			}
+			defer rows.Close()
+			var groups []string
+			for rows.Next() {
+				var group string
+				err = rows.Scan(&group)
+				if err != nil {
+					log.Fatalf("Failed to scan row: %v", err)
+				}
+				groups = append(groups, group)
+			}
+			if err = rows.Err(); err != nil {
+				log.Fatalf("Failed to iterate rows: %v", err)
+			}
+			enc := json.NewEncoder(w)
+			if err := enc.Encode(groups); err != nil {
+				log.Fatalf("Failed to encode response: %v", err)
+			}
+		} else if group != "" && stream == "" {
+			// get all streams for group
+			rows, err := db.Query("SELECT DISTINCT stream FROM events WHERE \"group\" = ?", group)
+			if err != nil {
+				log.Fatalf("Failed to execute statement: %v", err)
+			}
+			defer rows.Close()
+			var streams []string
+			for rows.Next() {
+				var stream string
+				err = rows.Scan(&stream)
+				if err != nil {
+					log.Fatalf("Failed to scan row: %v", err)
+				}
+				streams = append(streams, stream)
+			}
+			if err = rows.Err(); err != nil {
+				log.Fatalf("Failed to iterate rows: %v", err)
+			}
+			enc := json.NewEncoder(w)
+			if err := enc.Encode(streams); err != nil {
+				log.Fatalf("Failed to encode response: %v", err)
+			}
 		} else {
 			rows, err := db.Query("SELECT timestamp, message FROM events WHERE \"group\" = ? AND stream = ? ORDER BY timestamp", group, stream)
 			if err != nil {
