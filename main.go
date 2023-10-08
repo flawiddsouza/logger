@@ -22,7 +22,8 @@ type Event struct {
 }
 
 func getDB() *sql.DB {
-	db, err := sql.Open("sqlite3", "./logger.db")
+	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
+	db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
