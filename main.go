@@ -45,9 +45,13 @@ var db *sql.DB
 
 func main() {
 	db = getDB()
-	http.HandleFunc("/log", handleMessage)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.Dir("ui/dist")))
+	mux.HandleFunc("/log", handleMessage)
 	println("Starting server at http://localhost:4964")
-	http.ListenAndServe(":4964", nil)
+	http.ListenAndServe(":4964", mux)
+
 	defer db.Close()
 }
 

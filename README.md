@@ -5,6 +5,9 @@ go run main.go
 
 ### Prod (Build)
 ```bash
+cd ui
+npm run build
+cd ..
 go build -o dist/logger
 ```
 
