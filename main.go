@@ -79,20 +79,21 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to encode response: %v", err)
 			}
 		} else if group != "" && stream == "" {
-			// get all streams for group
-			rows, err := db.Query("SELECT DISTINCT stream FROM events WHERE \"group\" = ?", group)
+			// get all streams for group with last event time
+			rows, err := db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? GROUP BY stream ORDER BY lastEventTime DESC", group)
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
 			defer rows.Close()
-			var streams []string
+			var streams []map[string]string
 			for rows.Next() {
 				var stream string
-				err = rows.Scan(&stream)
+				var lastEventTime string
+				err = rows.Scan(&stream, &lastEventTime)
 				if err != nil {
 					log.Fatalf("Failed to scan row: %v", err)
 				}
-				streams = append(streams, stream)
+				streams = append(streams, map[string]string{"stream": stream, "lastEventTime": lastEventTime})
 			}
 			if err = rows.Err(); err != nil {
 				log.Fatalf("Failed to iterate rows: %v", err)
