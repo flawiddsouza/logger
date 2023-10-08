@@ -56,20 +56,21 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
 		if group == "" {
-			// get all groups
-			rows, err := db.Query("SELECT DISTINCT \"group\" FROM events")
+			// get all groups with last event time
+			rows, err := db.Query("SELECT \"group\", MAX(timestamp) AS lastEventTime FROM events GROUP BY \"group\" ORDER BY lastEventTime DESC")
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
 			defer rows.Close()
-			var groups []string
+			var groups []map[string]string
 			for rows.Next() {
 				var group string
-				err = rows.Scan(&group)
+				var lastEventTime string
+				err = rows.Scan(&group, &lastEventTime)
 				if err != nil {
 					log.Fatalf("Failed to scan row: %v", err)
 				}
-				groups = append(groups, group)
+				groups = append(groups, map[string]string{"group": group, "lastEventTime": lastEventTime})
 			}
 			if err = rows.Err(); err != nil {
 				log.Fatalf("Failed to iterate rows: %v", err)
