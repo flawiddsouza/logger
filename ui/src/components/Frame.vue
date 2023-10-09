@@ -1,30 +1,37 @@
 <template>
     <div class="mb-1rem">
-        <div class="two-column-table" v-if="selectedLogGroup === null">
-            <div class="two-column-table-row cursor-pointer" v-for="logGroup in logGroups" @click="selectedLogGroup = logGroup.group">
-                <div>{{ formatDate(logGroup.lastEventTime) }}</div>
-                <div>{{ logGroup.group }}</div>
+        <template v-if="selectedLogGroup === null">
+            <div class="mb-0_5rem">{{ logGroups.length }} records</div>
+            <div class="two-column-table">
+                <div class="two-column-table-row cursor-pointer" v-for="logGroup in logGroups" @click="selectedLogGroup = logGroup.group">
+                    <div>{{ formatDate(logGroup.lastEventTime) }}</div>
+                    <div>{{ logGroup.group }}</div>
+                </div>
             </div>
-        </div>
+        </template>
         <div v-else>
             Log Group: {{ selectedLogGroup }} <button @click="selectedLogGroup = null; selectedLogStream = null;">Back</button>
         </div>
     </div>
 
-    <div class="mb-1rem">
-        <div class="two-column-table" v-if="selectedLogStream === null">
-            <div class="two-column-table-row cursor-pointer" v-for="logStream in logStreams" @click="selectedLogStream = logStream.stream">
-                <div>{{ formatDate(logStream.lastEventTime) }}</div>
-                <div>{{ logStream.stream }}</div>
+    <div class="mb-1rem" v-if="selectedLogGroup !== null">
+        <template v-if="selectedLogStream === null">
+            <div class="mb-0_5rem">{{ logStreams.length }} records</div>
+            <div class="two-column-table">
+                <div class="two-column-table-row cursor-pointer" v-for="logStream in logStreams" @click="selectedLogStream = logStream.stream">
+                    <div>{{ formatDate(logStream.lastEventTime) }}</div>
+                    <div>{{ logStream.stream }}</div>
+                </div>
             </div>
-        </div>
+        </template>
         <div v-else>
             Log Stream: {{ selectedLogStream }} <button @click="selectedLogStream = null">Back</button>
         </div>
     </div>
 
-    <div class="mb-1rem">
-        <div class="two-column-table" v-if="selectedLogStream !== null">
+    <div class="mb-1rem" v-if="selectedLogStream !== null">
+        <div class="mb-0_5rem">{{ logs.length }} records</div>
+        <div class="two-column-table">
             <div class="two-column-table-row" v-for="log in logs">
                 <div>{{ formatDate(log.timestamp) }}</div>
                 <div>{{ log.message }}</div>

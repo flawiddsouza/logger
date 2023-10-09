@@ -25,6 +25,10 @@ body {
     margin-bottom: 1rem;
 }
 
+.mb-0_5rem {
+    margin-bottom: 0.5rem;
+}
+
 .cursor-pointer {
     cursor: pointer;
 }
