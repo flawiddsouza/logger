@@ -98,7 +98,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
 			defer rows.Close()
-			var streams []map[string]string
+			streams := []map[string]string{}
 			for rows.Next() {
 				var stream string
 				var lastEventTime string
