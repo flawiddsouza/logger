@@ -1,7 +1,8 @@
 <template>
     <div class="mb-1rem">
         <template v-if="selectedLogGroup === null">
-            <div class="mb-0_5rem">{{ logGroups.length }} records</div>
+            <div v-if="loadingLogGroups">Loading Log Groups...</div>
+            <div class="mb-0_5rem" v-else>{{ logGroups.length }} records</div>
             <div class="two-column-table">
                 <a
                     class="two-column-table-row cursor-pointer remove-anchor-styles"
@@ -21,11 +22,12 @@
 
     <div class="mb-1rem" v-if="selectedLogGroup !== null">
         <template v-if="selectedLogStream === null">
-            <div class="mb-0_5rem">{{ logStreams.length }} records</div>
             <form class="mb-0_5rem" @submit.prevent="getLogStreams">
-                <input type="search" v-model="search">
-                <button class="ml-0_5rem">Search</button>
+                <input type="search" :disabled="loadingLogStreams" v-model="search">
+                <button class="ml-0_5rem" :disabled="loadingLogStreams">Search</button>
             </form>
+            <div v-if="loadingLogStreams">Loading Log Streams...</div>
+            <div class="mb-0_5rem" v-else>{{ logStreams.length }} records</div>
             <div class="two-column-table">
                 <a
                     class="two-column-table-row cursor-pointer remove-anchor-styles"
@@ -44,7 +46,8 @@
     </div>
 
     <div class="mb-1rem" v-if="selectedLogStream !== null">
-        <div class="mb-0_5rem">{{ logs.length }} records</div>
+        <div v-if="loadingLogs">Loading Logs...</div>
+        <div class="mb-0_5rem" v-else>{{ logs.length }} records</div>
         <div class="two-column-table">
             <div class="two-column-table-row" v-for="log in logs">
                 <div>{{ formatDate(log.timestamp) }}</div>
@@ -65,6 +68,9 @@ const selectedLogStream = ref(null)
 const logs = ref([])
 const firstLoad = ref(true)
 const search = ref('')
+const loadingLogGroups = ref(false)
+const loadingLogStreams = ref(false)
+const loadingLogs = ref(false)
 
 function formatDate(date) {
     return dayjs(date).format('DD-MMM-YY hh:mm:ss A')
@@ -72,23 +78,32 @@ function formatDate(date) {
 
 async function getLogGroups() {
     console.log('Fetching log groups')
+    logGroups.value = []
+    loadingLogGroups.value = true
     const response = await fetch('/log')
     const data = await response.json()
     logGroups.value = data
+    loadingLogGroups.value = false
 }
 
 async function getLogStreams() {
     console.log('Fetching log streams')
+    logStreams.value = []
+    loadingLogStreams.value = true
     const response = await fetch(`/log?group=${selectedLogGroup.value}&search=${search.value}`)
     const data = await response.json()
     logStreams.value = data
+    loadingLogStreams.value = false
 }
 
 async function getLogs() {
     console.log('Fetching logs')
+    logs.value = []
+    loadingLogs.value = true
     const response = await fetch(`/log?group=${selectedLogGroup.value}&stream=${selectedLogStream.value}`)
     const data = await response.json()
     logs.value = data
+    loadingLogs.value = false
 }
 
 function setQueryParams() {
