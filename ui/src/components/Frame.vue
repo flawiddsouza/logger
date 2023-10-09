@@ -3,10 +3,15 @@
         <template v-if="selectedLogGroup === null">
             <div class="mb-0_5rem">{{ logGroups.length }} records</div>
             <div class="two-column-table">
-                <div class="two-column-table-row cursor-pointer" v-for="logGroup in logGroups" @click="selectedLogGroup = logGroup.group">
+                <a
+                    class="two-column-table-row cursor-pointer remove-anchor-styles"
+                    v-for="logGroup in logGroups"
+                    :href="getLogGroupHref(logGroup)"
+                    @click.prevent="selectedLogGroup = logGroup.group"
+                >
                     <div>{{ formatDate(logGroup.lastEventTime) }}</div>
                     <div>{{ logGroup.group }}</div>
-                </div>
+                </a>
             </div>
         </template>
         <div v-else>
@@ -22,10 +27,15 @@
                 <button class="ml-0_5rem">Search</button>
             </form>
             <div class="two-column-table">
-                <div class="two-column-table-row cursor-pointer" v-for="logStream in logStreams" @click="selectedLogStream = logStream.stream">
+                <a
+                    class="two-column-table-row cursor-pointer remove-anchor-styles"
+                    v-for="logStream in logStreams"
+                    :href="getLogStreamHref(logStream)"
+                    @click.prevent="selectedLogStream = logStream.stream"
+                >
                     <div>{{ formatDate(logStream.lastEventTime) }}</div>
                     <div>{{ logStream.stream }}</div>
-                </div>
+                </a>
             </div>
         </template>
         <div v-else>
@@ -118,6 +128,25 @@ async function loadQueryParams() {
         await getLogs()
         firstLoad.value = false
     }
+}
+
+function getLogGroupHref(logGroup) {
+    const queryObject = {
+        group: logGroup.group
+    }
+
+    const queryParams = new URLSearchParams(queryObject).toString()
+    return `?${queryParams}`
+}
+
+function getLogStreamHref(logStream) {
+    const queryObject = {
+        group: selectedLogGroup.value,
+        stream: logStream.stream
+    }
+
+    const queryParams = new URLSearchParams(queryObject).toString()
+    return `?${queryParams}`
 }
 
 watch(selectedLogGroup, () => {

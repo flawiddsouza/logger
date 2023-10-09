@@ -36,3 +36,8 @@ body {
 .cursor-pointer {
     cursor: pointer;
 }
+
+.remove-anchor-styles {
+    text-decoration: none;
+    color: inherit;
+}
