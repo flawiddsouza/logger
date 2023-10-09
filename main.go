@@ -60,6 +60,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
+		search := r.URL.Query().Get("search")
 		if group == "" {
 			// get all groups with last event time
 			rows, err := db.Query("SELECT \"group\", MAX(timestamp) AS lastEventTime FROM events GROUP BY \"group\" ORDER BY lastEventTime DESC")
@@ -86,7 +87,13 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if group != "" && stream == "" {
 			// get all streams for group with last event time
-			rows, err := db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? GROUP BY stream ORDER BY lastEventTime DESC", group)
+			var rows *sql.Rows
+			var err error
+			if search != "" {
+				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? AND message LIKE ? GROUP BY stream ORDER BY lastEventTime DESC", group, "%"+search+"%")
+			} else {
+				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? GROUP BY stream ORDER BY lastEventTime DESC", group)
+			}
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}

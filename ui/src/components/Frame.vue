@@ -17,6 +17,10 @@
     <div class="mb-1rem" v-if="selectedLogGroup !== null">
         <template v-if="selectedLogStream === null">
             <div class="mb-0_5rem">{{ logStreams.length }} records</div>
+            <form class="mb-0_5rem" @submit.prevent="getLogStreams">
+                <input type="search" v-model="search">
+                <button class="ml-0_5rem">Search</button>
+            </form>
             <div class="two-column-table">
                 <div class="two-column-table-row cursor-pointer" v-for="logStream in logStreams" @click="selectedLogStream = logStream.stream">
                     <div>{{ formatDate(logStream.lastEventTime) }}</div>
@@ -50,6 +54,7 @@ const logStreams = ref([])
 const selectedLogStream = ref(null)
 const logs = ref([])
 const firstLoad = ref(true)
+const search = ref('')
 
 function formatDate(date) {
     return dayjs(date).format('DD-MMM-YY hh:mm:ss A')
@@ -64,7 +69,7 @@ async function getLogGroups() {
 
 async function getLogStreams() {
     console.log('Fetching log streams')
-    const response = await fetch(`/log?group=${selectedLogGroup.value}`)
+    const response = await fetch(`/log?group=${selectedLogGroup.value}&search=${search.value}`)
     const data = await response.json()
     logStreams.value = data
 }
