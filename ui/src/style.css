@@ -18,6 +18,7 @@ body {
     grid-template-columns: auto 1fr;
     word-break: break-all;
     grid-column-gap: 0.5rem;
+    content-visibility: auto;
 }
 
 .mb-1rem {
