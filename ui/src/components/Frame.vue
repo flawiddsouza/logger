@@ -42,24 +42,28 @@ const selectedLogGroup = ref(null)
 const logStreams = ref([])
 const selectedLogStream = ref(null)
 const logs = ref([])
+const firstLoad = ref(true)
 
 function formatDate(date) {
     return dayjs(date).format('DD-MMM-YY hh:mm:ss A')
 }
 
 async function getLogGroups() {
+    console.log('Fetching log groups')
     const response = await fetch('/log')
     const data = await response.json()
     logGroups.value = data
 }
 
 async function getLogStreams() {
+    console.log('Fetching log streams')
     const response = await fetch(`/log?group=${selectedLogGroup.value}`)
     const data = await response.json()
     logStreams.value = data
 }
 
 async function getLogs() {
+    console.log('Fetching logs')
     const response = await fetch(`/log?group=${selectedLogGroup.value}&stream=${selectedLogStream.value}`)
     const data = await response.json()
     logs.value = data
@@ -77,38 +81,64 @@ function setQueryParams() {
     history.pushState(null, null, queryParams.length ? `?${queryParams}` : '/')
 }
 
-function loadQueryParams() {
+async function loadQueryParams() {
     const queryParams = new URLSearchParams(window.location.search)
     const group = queryParams.get('group')
     const stream = queryParams.get('stream')
+
+    if (group === null) {
+        await getLogGroups()
+        firstLoad.value = false
+        return
+    }
+
     if(group !== null) {
         selectedLogGroup.value = group
+        if (stream === null) {
+            await getLogStreams()
+            firstLoad.value = false
+            return
+        }
     }
+
     if(stream !== null) {
         selectedLogStream.value = stream
+        await getLogs()
+        firstLoad.value = false
     }
 }
 
 watch(selectedLogGroup, () => {
+    console.log('selectedLogGroup changed', selectedLogGroup.value)
+    if (firstLoad.value === true) {
+        console.log('selectedLogGroup change skipped: firstLoad')
+        return
+    }
     setQueryParams()
     if (selectedLogGroup.value === null) {
         logStreams.value = []
+        getLogGroups()
         return
     }
     getLogStreams()
 })
 
 watch(selectedLogStream, () => {
+    console.log('selectedLogStream changed', selectedLogStream.value)
+    if (firstLoad.value === true) {
+        console.log('selectedLogStream change skipped: firstLoad')
+        return
+    }
     setQueryParams()
     if (selectedLogStream.value === null) {
         logs.value = []
+        getLogStreams()
         return
     }
     getLogs()
 })
 
 onBeforeMount(() => {
-    getLogGroups()
     loadQueryParams()
 })
 </script>
