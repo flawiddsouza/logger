@@ -129,7 +129,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
 			defer rows.Close()
-			var messages []Event
+			messages := []Event{}
 			for rows.Next() {
 				var msg Event
 				err = rows.Scan(&msg.Timestamp, &msg.Message)
