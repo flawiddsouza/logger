@@ -76,7 +76,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
 			defer rows.Close()
-			var groups []map[string]string
+			groups := []map[string]string{}
 			for rows.Next() {
 				var group string
 				var lastEventTime string
