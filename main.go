@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -21,24 +22,31 @@ type Event struct {
 	Message   string `json:"message"`
 }
 
+func createTable(db *sql.DB, table string, columns []string) {
+	_, err := db.Exec("CREATE TABLE IF NOT EXISTS " + table + "(" + strings.Join(columns, ", ") + ")")
+	if err != nil {
+		log.Fatalf("Failed to create table: %v", err)
+	}
+}
+
+func createIndex(db *sql.DB, tableColumn string, index string) {
+	_, err := db.Exec("CREATE INDEX IF NOT EXISTS " + index + " ON " + tableColumn)
+	if err != nil {
+		log.Fatalf("Failed to create index: %v", err)
+	}
+}
+
 func getDB() *sql.DB {
 	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
 	db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS events(\"group\" TEXT, stream TEXT, timestamp TEXT, message TEXT)")
-	if err != nil {
-		log.Fatalf("Failed to create table: %v", err)
-	}
-	_, err = db.Exec("CREATE INDEX IF NOT EXISTS group_index ON events(\"group\")")
-	if err != nil {
-		log.Fatalf("Failed to create index: %v", err)
-	}
-	_, err = db.Exec("CREATE INDEX IF NOT EXISTS stream_index ON events(stream)")
-	if err != nil {
-		log.Fatalf("Failed to create index: %v", err)
-	}
+
+	createTable(db, "events", []string{"\"group\" TEXT", "stream TEXT", "timestamp TEXT", "message TEXT"})
+	createIndex(db, "events(\"group\")", "group_index")
+	createIndex(db, "events(stream)", "stream_index")
+
 	return db
 }
 
