@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -37,6 +38,7 @@ func createIndex(db *sql.DB, tableColumn string, index string) {
 }
 
 func getDB() *sql.DB {
+	// db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/logger?sslmode=disable")
 	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
 	db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
 	if err != nil {
@@ -98,9 +100,9 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			var rows *sql.Rows
 			var err error
 			if search != "" {
-				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? AND message LIKE ? GROUP BY stream ORDER BY lastEventTime DESC", group, "%"+search+"%")
+				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = $1 AND message LIKE $2 GROUP BY stream ORDER BY lastEventTime DESC", group, "%"+search+"%")
 			} else {
-				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = ? GROUP BY stream ORDER BY lastEventTime DESC", group)
+				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = $1 GROUP BY stream ORDER BY lastEventTime DESC", group)
 			}
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
@@ -124,7 +126,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to encode response: %v", err)
 			}
 		} else {
-			rows, err := db.Query("SELECT timestamp, message FROM events WHERE \"group\" = ? AND stream = ? ORDER BY timestamp", group, stream)
+			rows, err := db.Query("SELECT timestamp, message FROM events WHERE \"group\" = $1 AND stream = $2 ORDER BY timestamp", group, stream)
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
@@ -152,7 +154,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		if err := dec.Decode(&msg); err != nil {
 			http.Error(w, "Invalid Request", http.StatusBadRequest)
 		} else {
-			stmt, err := db.Prepare("INSERT INTO events(\"group\", stream, timestamp, message) values(?,?,?,?)")
+			stmt, err := db.Prepare("INSERT INTO events(\"group\", stream, timestamp, message) values($1,$2,$3,$4)")
 			if err != nil {
 				log.Fatalf("Failed to prepare statement: %v", err)
 			}
