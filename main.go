@@ -153,15 +153,17 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		var msg EventRequest
 		if err := dec.Decode(&msg); err != nil {
 			http.Error(w, "Invalid Request", http.StatusBadRequest)
-		} else {
-			stmt, err := db.Prepare("INSERT INTO events(\"group\", stream, timestamp, message) values($1,$2,$3,$4)")
-			if err != nil {
-				log.Fatalf("Failed to prepare statement: %v", err)
-			}
-			_, err = stmt.Exec(msg.Group, msg.Stream, msg.Timestamp, msg.Message)
-			if err != nil {
-				log.Fatalf("Failed to execute statement: %v", err)
-			}
+			return
+		}
+		defer r.Body.Close()
+		stmt, err := db.Prepare("INSERT INTO events(\"group\", stream, timestamp, message) values($1,$2,$3,$4)")
+		if err != nil {
+			log.Fatalf("Failed to prepare statement: %v", err)
+		}
+		defer stmt.Close()
+		_, err = stmt.Exec(msg.Group, msg.Stream, msg.Timestamp, msg.Message)
+		if err != nil {
+			log.Fatalf("Failed to execute statement: %v", err)
 		}
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
