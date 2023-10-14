@@ -37,14 +37,23 @@ func createIndex(db *sql.DB, tableColumn string, index string) {
 	}
 }
 
+func createCompositeUniqueIndex(db *sql.DB, table string, columns []string, index string) {
+	_, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS " + index + " ON " + table + "(" + strings.Join(columns, ", ") + ")")
+	if err != nil {
+		log.Fatalf("Failed to create index: %v", err)
+	}
+}
+
 func getDB() *sql.DB {
-	// db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/logger?sslmode=disable")
+	db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/logger?sslmode=disable")
 	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
-	db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
+	//db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
+	createTable(db, "streams", []string{"\"group\" TEXT", "stream TEXT", "lastEventTime TEXT"})
+	createCompositeUniqueIndex(db, "streams", []string{"\"group\"", "stream"}, "group_stream_unique_index")
 	createTable(db, "events", []string{"\"group\" TEXT", "stream TEXT", "timestamp TEXT", "message TEXT"})
 	createIndex(db, "events(\"group\")", "group_index")
 	createIndex(db, "events(stream)", "stream_index")
@@ -102,7 +111,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			if search != "" {
 				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = $1 AND message LIKE $2 GROUP BY stream ORDER BY lastEventTime DESC", group, "%"+search+"%")
 			} else {
-				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = $1 GROUP BY stream ORDER BY lastEventTime DESC", group)
+				rows, err = db.Query("SELECT stream, lastEventTime FROM streams WHERE \"group\" = $1 ORDER BY lastEventTime DESC", group)
 			}
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
@@ -156,6 +165,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer r.Body.Close()
+
 		stmt, err := db.Prepare("INSERT INTO events(\"group\", stream, timestamp, message) values($1,$2,$3,$4)")
 		if err != nil {
 			log.Fatalf("Failed to prepare statement: %v", err)
@@ -165,6 +175,18 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatalf("Failed to execute statement: %v", err)
 		}
+
+		stmt, err = db.Prepare("INSERT INTO streams(\"group\", stream, lastEventTime) values($1,$2,$3) ON CONFLICT (\"group\", stream) DO UPDATE SET lastEventTime = $3")
+		if err != nil {
+			log.Fatalf("Failed to prepare statement: %v", err)
+		}
+		defer stmt.Close()
+		_, err = stmt.Exec(msg.Group, msg.Stream, msg.Timestamp)
+		if err != nil {
+			log.Fatalf("Failed to execute statement: %v", err)
+		}
+
+		w.WriteHeader(http.StatusCreated)
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 	}
