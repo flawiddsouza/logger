@@ -36,7 +36,7 @@
                     @click.prevent="selectedLogStream = logStream.stream"
                 >
                     <div>{{ formatDate(logStream.lastEventTime) }}</div>
-                    <div>{{ logStream.stream }}</div>
+                    <div>{{ logStream.stream }}<div v-if="logStream.message" v-html="logStream.message"></div></div>
                 </a>
             </div>
         </template>

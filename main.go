@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/meilisearch/meilisearch-go"
 )
 
 type EventRequest struct {
@@ -62,9 +65,22 @@ func getDB() *sql.DB {
 }
 
 var db *sql.DB
+var meilisearchEventsIndex *meilisearch.Index
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	db = getDB()
+
+	meilisearchClient := meilisearch.NewClient(meilisearch.ClientConfig{
+		Host:   os.Getenv("MEILISEARCH_API_URL"),
+		APIKey: os.Getenv("MEILISEARCH_API_KEY"),
+	})
+
+	meilisearchEventsIndex = meilisearchClient.Index("events")
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("ui/dist")))
@@ -80,6 +96,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
 		search := r.URL.Query().Get("search")
+		var streams []map[string]string
 		if group == "" {
 			// get all groups with last event time
 			rows, err := db.Query("SELECT \"group\", MAX(lastEventTime) AS lastEventTime FROM streams GROUP BY \"group\" ORDER BY lastEventTime DESC")
@@ -109,26 +126,41 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			var rows *sql.Rows
 			var err error
 			if search != "" {
-				rows, err = db.Query("SELECT stream, MAX(timestamp) AS lastEventTime FROM events WHERE \"group\" = $1 AND message LIKE $2 GROUP BY stream ORDER BY lastEventTime DESC", group, "%"+search+"%")
+				meilisearchEvents, err := meilisearchEventsIndex.Search(search, &meilisearch.SearchRequest{
+					Limit:                 1000, // 1000 is the max limit, as maxTotalHits defaults to 1000 (not sure how to increase that)
+					AttributesToHighlight: []string{"message"},
+					HighlightPreTag:       "<mark>",
+					HighlightPostTag:      "</mark>",
+					// Filter: "group = \"" + group + "\"",
+				})
+
+				if err != nil {
+					log.Fatalf("Failed to execute statement: %v", err)
+				}
+
+				streams = []map[string]string{}
+				for _, hit := range meilisearchEvents.Hits {
+					streams = append(streams, map[string]string{"stream": hit.(map[string]interface{})["stream"].(string), "lastEventTime": hit.(map[string]interface{})["timestamp"].(string), "message": hit.(map[string]interface{})["_formatted"].(map[string]interface{})["message"].(string)})
+				}
 			} else {
 				rows, err = db.Query("SELECT stream, lastEventTime FROM streams WHERE \"group\" = $1 ORDER BY lastEventTime DESC", group)
-			}
-			if err != nil {
-				log.Fatalf("Failed to execute statement: %v", err)
-			}
-			defer rows.Close()
-			streams := []map[string]string{}
-			for rows.Next() {
-				var stream string
-				var lastEventTime string
-				err = rows.Scan(&stream, &lastEventTime)
 				if err != nil {
-					log.Fatalf("Failed to scan row: %v", err)
+					log.Fatalf("Failed to execute statement: %v", err)
 				}
-				streams = append(streams, map[string]string{"stream": stream, "lastEventTime": lastEventTime})
-			}
-			if err = rows.Err(); err != nil {
-				log.Fatalf("Failed to iterate rows: %v", err)
+				defer rows.Close()
+				streams = []map[string]string{}
+				for rows.Next() {
+					var stream string
+					var lastEventTime string
+					err = rows.Scan(&stream, &lastEventTime)
+					if err != nil {
+						log.Fatalf("Failed to scan row: %v", err)
+					}
+					streams = append(streams, map[string]string{"stream": stream, "lastEventTime": lastEventTime})
+				}
+				if err = rows.Err(); err != nil {
+					log.Fatalf("Failed to iterate rows: %v", err)
+				}
 			}
 			enc := json.NewEncoder(w)
 			if err := enc.Encode(streams); err != nil {
@@ -185,6 +217,14 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatalf("Failed to execute statement: %v", err)
 		}
+
+		meilisearchEventsIndex.AddDocuments([]map[string]interface{}{{
+			"id":        msg.Group + "_" + msg.Stream + "_" + strings.ReplaceAll(strings.ReplaceAll(msg.Timestamp, ":", "_"), ".", "_"),
+			"group":     msg.Group,
+			"stream":    msg.Stream,
+			"timestamp": msg.Timestamp,
+			"message":   msg.Message,
+		}})
 
 		w.WriteHeader(http.StatusCreated)
 	} else {
