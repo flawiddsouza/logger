@@ -82,7 +82,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		search := r.URL.Query().Get("search")
 		if group == "" {
 			// get all groups with last event time
-			rows, err := db.Query("SELECT \"group\", MAX(timestamp) AS lastEventTime FROM events GROUP BY \"group\" ORDER BY lastEventTime DESC")
+			rows, err := db.Query("SELECT \"group\", MAX(lastEventTime) AS lastEventTime FROM streams GROUP BY \"group\" ORDER BY lastEventTime DESC")
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
