@@ -77,6 +77,7 @@ function formatDate(date) {
 }
 
 async function getLogGroups() {
+    document.title = 'Logger'
     console.log('Fetching log groups')
     logGroups.value = []
     loadingLogGroups.value = true
@@ -87,6 +88,11 @@ async function getLogGroups() {
 }
 
 async function getLogStreams() {
+    if (search.value) {
+        document.title = `"${search.value}" - ${selectedLogGroup.value}`
+    } else {
+        document.title = `${selectedLogGroup.value}`
+    }
     console.log('Fetching log streams')
     logStreams.value = []
     loadingLogStreams.value = true
@@ -97,6 +103,7 @@ async function getLogStreams() {
 }
 
 async function getLogs() {
+    document.title = `${selectedLogStream.value} - ${selectedLogGroup.value}`
     console.log('Fetching logs')
     logs.value = []
     loadingLogs.value = true
