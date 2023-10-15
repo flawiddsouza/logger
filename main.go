@@ -3,10 +3,13 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -85,6 +88,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("ui/dist")))
 	mux.HandleFunc("/log", handleMessage)
+	mux.HandleFunc("/index", handleIndexing)
 	println("Starting server at http://localhost:4964")
 	http.ListenAndServe(":4964", mux)
 
@@ -227,6 +231,80 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		}})
 
 		w.WriteHeader(http.StatusCreated)
+	} else {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleIndexing(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		// Start total timing
+		start := time.Now()
+
+		const ChunkSize = 500000
+		var counter int = 1
+		for offset := 0; ; offset += ChunkSize {
+			var rows *sql.Rows
+			var err error
+
+			// Start timing DB Query
+			queryStart := time.Now()
+
+			rows, err = db.Query("SELECT \"group\", stream, timestamp, message FROM events ORDER BY \"group\", stream, timestamp LIMIT $1 OFFSET $2", ChunkSize, offset)
+
+			fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+
+			if err != nil {
+				log.Fatalf("Failed to execute statement: %v", err)
+			}
+
+			// Start timing row scan
+			rowScanStart := time.Now()
+
+			events := []map[string]interface{}{}
+			for rows.Next() {
+				var group string
+				var stream string
+				var timestamp string
+				var message string
+				err = rows.Scan(&group, &stream, &timestamp, &message)
+				if err != nil {
+					log.Fatalf("Failed to scan row: %v", err)
+				}
+				events = append(events, map[string]interface{}{
+					"id":        group + "_" + stream + "_" + strings.ReplaceAll(strings.ReplaceAll(timestamp, ":", "_"), ".", "_"),
+					"group":     group,
+					"stream":    stream,
+					"timestamp": timestamp,
+					"message":   message,
+				})
+			}
+			if err = rows.Err(); err != nil {
+				log.Fatalf("Failed to iterate rows: %v", err)
+			}
+			rows.Close()
+
+			fmt.Printf("Row scan took %v\n", time.Since(rowScanStart))
+
+			if len(events) == 0 {
+				break
+			}
+
+			println("Indexing " + strconv.Itoa(len(events)) + " events / " + strconv.Itoa(counter) + " fetch batches done")
+
+			// Start timing meilisearchEventsIndex.AddDocuments
+			indexStart := time.Now()
+
+			meilisearchEventsIndex.AddDocumentsInBatches(events, 100000)
+
+			fmt.Printf("Indexing took %v\n", time.Since(indexStart))
+
+			counter++
+		}
+
+		fmt.Printf("Total operation took %s\n", time.Since(start))
+
+		w.WriteHeader(http.StatusOK)
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 	}
