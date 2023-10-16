@@ -47,7 +47,7 @@
 
     <div class="mb-1rem" v-if="selectedLogStream !== null">
         <div v-if="loadingLogs">Loading Logs...</div>
-        <div class="mb-0_5rem" v-else>{{ logs.length }} records</div>
+        <div class="mb-0_5rem" v-else>{{ logs.length }} records <button @click="downloadLog">Download Log</button></div>
         <div class="two-column-table">
             <div class="two-column-table-row" v-for="log in logs">
                 <div>{{ formatDate(log.timestamp) }}</div>
@@ -169,6 +169,19 @@ function getLogStreamHref(logStream) {
 
     const queryParams = new URLSearchParams(queryObject).toString()
     return `?${queryParams}`
+}
+
+async function downloadLog() {
+    const logText = logs.value.map(log => `${formatDate(log.timestamp)}: ${log.message.trim()}`).join('\n')
+    const textBlob = new Blob([logText], { type: 'text/plain' })
+    const url = URL.createObjectURL(textBlob)
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${selectedLogStream.value}.txt`
+    link.click()
+
+    URL.revokeObjectURL(url)
 }
 
 watch(selectedLogGroup, () => {
