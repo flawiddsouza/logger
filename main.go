@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
@@ -95,10 +96,22 @@ func main() {
 	defer db.Close()
 }
 
-func handleMessage(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		println("GET /log")
+func createLogger(r *http.Request) func(string, ...interface{}) {
+	requestId := uuid.New().String()
+	method := r.Method
+	path := r.URL.Path
 
+	return func(format string, a ...interface{}) {
+		logMessage := fmt.Sprintf(format, a...)
+		prefixedMessage := fmt.Sprintf("[%s] %s %s: %s", requestId, method, path, logMessage)
+		fmt.Println(prefixedMessage)
+	}
+}
+
+func handleMessage(w http.ResponseWriter, r *http.Request) {
+	logger := createLogger(r)
+
+	if r.Method == http.MethodGet {
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
 		search := r.URL.Query().Get("search")
@@ -181,7 +194,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 
 			rows, err := db.Query("SELECT timestamp, message FROM events WHERE \"group\" = $1 AND stream = $2 ORDER BY timestamp", group, stream)
 
-			fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+			logger("DB Query took %v\n", time.Since(queryStart))
 
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
@@ -204,7 +217,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to iterate rows: %v", err)
 			}
 
-			fmt.Printf("Row scan took %v\n", time.Since(rowScanStart))
+			logger("Row scan took %v\n", time.Since(rowScanStart))
 
 			enc := json.NewEncoder(w)
 			if err := enc.Encode(messages); err != nil {
@@ -212,10 +225,8 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		fmt.Printf("Total operation took %s\n", time.Since(start))
+		logger("Total operation took %s\n", time.Since(start))
 	} else if r.Method == http.MethodPost {
-		println("POST /log")
-
 		start := time.Now()
 
 		dec := json.NewDecoder(r.Body)
@@ -256,7 +267,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusCreated)
 
-		fmt.Printf("Total operation took %s\n", time.Since(start))
+		logger("Total operation took %s\n", time.Since(start))
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 	}
