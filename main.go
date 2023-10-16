@@ -97,10 +97,15 @@ func main() {
 
 func handleMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
+		println("GET /log")
+
 		group := r.URL.Query().Get("group")
 		stream := r.URL.Query().Get("stream")
 		search := r.URL.Query().Get("search")
 		var streams []map[string]string
+
+		start := time.Now()
+
 		if group == "" {
 			// get all groups with last event time
 			rows, err := db.Query("SELECT \"group\", MAX(lastEventTime) AS lastEventTime FROM streams GROUP BY \"group\" ORDER BY lastEventTime DESC")
@@ -171,10 +176,20 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 				log.Fatalf("Failed to encode response: %v", err)
 			}
 		} else {
+			// Start timing DB Query
+			queryStart := time.Now()
+
 			rows, err := db.Query("SELECT timestamp, message FROM events WHERE \"group\" = $1 AND stream = $2 ORDER BY timestamp", group, stream)
+
+			fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+
 			if err != nil {
 				log.Fatalf("Failed to execute statement: %v", err)
 			}
+
+			// Start timing row scan
+			rowScanStart := time.Now()
+
 			defer rows.Close()
 			messages := []Event{}
 			for rows.Next() {
@@ -188,12 +203,21 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			if err = rows.Err(); err != nil {
 				log.Fatalf("Failed to iterate rows: %v", err)
 			}
+
+			fmt.Printf("Row scan took %v\n", time.Since(rowScanStart))
+
 			enc := json.NewEncoder(w)
 			if err := enc.Encode(messages); err != nil {
 				log.Fatalf("Failed to encode response: %v", err)
 			}
 		}
+
+		fmt.Printf("Total operation took %s\n", time.Since(start))
 	} else if r.Method == http.MethodPost {
+		println("POST /log")
+
+		start := time.Now()
+
 		dec := json.NewDecoder(r.Body)
 		var msg EventRequest
 		if err := dec.Decode(&msg); err != nil {
@@ -231,6 +255,8 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 		}})
 
 		w.WriteHeader(http.StatusCreated)
+
+		fmt.Printf("Total operation took %s\n", time.Since(start))
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 	}
