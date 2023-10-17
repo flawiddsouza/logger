@@ -62,8 +62,7 @@ func getDB() *sql.DB {
 	createTable(db, "streams", []string{"\"group\" TEXT", "stream TEXT", "lastEventTime TEXT"})
 	createCompositeUniqueIndex(db, "streams", []string{"\"group\"", "stream"}, "group_stream_unique_index")
 	createTable(db, "events", []string{"\"group\" TEXT", "stream TEXT", "timestamp TEXT", "message TEXT"})
-	createIndex(db, "events(\"group\")", "group_index")
-	createIndex(db, "events(stream)", "stream_index")
+	createIndex(db, "events(\"group\", stream, timestamp)", "group_stream_timestamp_index")
 
 	return db
 }
@@ -85,6 +84,25 @@ func main() {
 	})
 
 	meilisearchEventsIndex = meilisearchClient.Index("events")
+
+	// deleteAllEvents()
+	// os.Exit(0)
+
+	result, err := meilisearchEventsIndex.GetSettings()
+
+	if err != nil {
+		log.Printf("Failed to get events index settings: %v", err)
+	} else {
+		if len(result.FilterableAttributes) < 3 || len(result.SortableAttributes) == 0 {
+			println("Updating meilisearch events index settings")
+			meilisearchEventsIndex.UpdateSettings(&meilisearch.Settings{
+				FilterableAttributes: []string{"group", "stream", "timestamp_epoch"},
+				SortableAttributes:   []string{"timestamp_epoch"},
+			})
+		}
+	}
+
+	deleteEventsOlderThan(2)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("ui/dist")))
@@ -257,12 +275,19 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			log.Fatalf("Failed to execute statement: %v", err)
 		}
 
+		timestampEpoch, err := time.Parse(time.RFC3339, msg.Timestamp)
+
+		if err != nil {
+			log.Fatalf("Failed to parse timestamp: %v", err)
+		}
+
 		meilisearchEventsIndex.AddDocuments([]map[string]interface{}{{
-			"id":        msg.Group + "_" + msg.Stream + "_" + strings.ReplaceAll(strings.ReplaceAll(msg.Timestamp, ":", "_"), ".", "_"),
-			"group":     msg.Group,
-			"stream":    msg.Stream,
-			"timestamp": msg.Timestamp,
-			"message":   msg.Message,
+			"id":              msg.Group + "_" + msg.Stream + "_" + strings.ReplaceAll(strings.ReplaceAll(msg.Timestamp, ":", "_"), ".", "_"),
+			"group":           msg.Group,
+			"stream":          msg.Stream,
+			"timestamp":       msg.Timestamp,
+			"message":         msg.Message,
+			"timestamp_epoch": timestampEpoch.Unix(),
 		}})
 
 		w.WriteHeader(http.StatusCreated)
@@ -308,12 +333,20 @@ func handleIndexing(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					log.Fatalf("Failed to scan row: %v", err)
 				}
+
+				timestampEpoch, err := time.Parse(time.RFC3339, timestamp)
+
+				if err != nil {
+					log.Fatalf("Failed to parse timestamp: %v", err)
+				}
+
 				events = append(events, map[string]interface{}{
-					"id":        group + "_" + stream + "_" + strings.ReplaceAll(strings.ReplaceAll(timestamp, ":", "_"), ".", "_"),
-					"group":     group,
-					"stream":    stream,
-					"timestamp": timestamp,
-					"message":   message,
+					"id":              group + "_" + stream + "_" + strings.ReplaceAll(strings.ReplaceAll(timestamp, ":", "_"), ".", "_"),
+					"group":           group,
+					"stream":          stream,
+					"timestamp":       timestamp,
+					"message":         message,
+					"timestamp_epoch": timestampEpoch.Unix(),
 				})
 			}
 			if err = rows.Err(); err != nil {
@@ -345,4 +378,75 @@ func handleIndexing(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 	}
+}
+
+func deleteEventsOlderThan(days int) {
+	// Start total timing
+	start := time.Now()
+
+	// Start timing DB Query
+	queryStart := time.Now()
+
+	stmt, err := db.Prepare("DELETE FROM events WHERE timestamp < $1")
+	if err != nil {
+		log.Fatalf("Failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(time.Now().AddDate(0, 0, -days).Format(time.RFC3339))
+	if err != nil {
+		log.Fatalf("Failed to execute statement: %v", err)
+	}
+
+	fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+
+	// Start timing meilisearchEventsIndex.DeleteDocumentsByFilter
+	indexStart := time.Now()
+
+	response, err := meilisearchEventsIndex.DeleteDocumentsByFilter(`timestamp_epoch < "` + strconv.Itoa(int(time.Now().AddDate(0, 0, -days).Unix())) + `"`)
+
+	if err != nil {
+		log.Fatalf("Failed to DeleteDocumentsByFilter: %v", err)
+	}
+
+	fmt.Printf("Meilisearch response: %v\n", response)
+
+	fmt.Printf("Deleting documents from index took %v\n", time.Since(indexStart))
+
+	fmt.Printf("Total operation took %s\n", time.Since(start))
+}
+
+//lint:ignore U1000 This is a utility function
+func deleteAllEvents() {
+	// Start total timing
+	start := time.Now()
+
+	// Start timing DB Query
+	queryStart := time.Now()
+
+	stmt, err := db.Prepare("DELETE FROM events")
+	if err != nil {
+		log.Fatalf("Failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Fatalf("Failed to execute statement: %v", err)
+	}
+
+	fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+
+	// Start timing meilisearchEventsIndex.DeleteAllDocuments
+	indexStart := time.Now()
+
+	response, err := meilisearchEventsIndex.DeleteAllDocuments()
+
+	if err != nil {
+		log.Fatalf("Failed to DeleteAllDocuments: %v", err)
+	}
+
+	fmt.Printf("Meilisearch response: %v\n", response)
+
+	fmt.Printf("Deleting all documents from index took %v\n", time.Since(indexStart))
+
+	fmt.Printf("Total operation took %s\n", time.Since(start))
 }
