@@ -51,6 +51,28 @@ func createCompositeUniqueIndex(db *sql.DB, table string, columns []string, inde
 	}
 }
 
+func createTsVector(db *sql.DB, table string, column string) {
+	_, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS " + column + "_tsvector tsvector")
+	if err != nil {
+		log.Fatalf("Failed to create tsvector: %v", err)
+	}
+
+	_, err = db.Exec("UPDATE " + table + " SET " + column + "_tsvector = to_tsvector('english', " + column + ") WHERE " + column + "_tsvector IS NULL")
+	if err != nil {
+		log.Fatalf("Failed to update tsvector: %v", err)
+	}
+
+	_, err = db.Exec("CREATE INDEX IF NOT EXISTS " + table + "_" + column + "_tsvector_index ON " + table + " USING GIN(" + column + "_tsvector)")
+	if err != nil {
+		log.Fatalf("Failed to create tsvector index: %v", err)
+	}
+
+	_, err = db.Exec("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '" + table + "_" + column + "_tsvector_update') THEN CREATE TRIGGER " + table + "_" + column + "_tsvector_update BEFORE INSERT OR UPDATE ON " + table + " FOR EACH ROW EXECUTE PROCEDURE tsvector_update_trigger(" + column + "_tsvector, 'pg_catalog.english', " + column + "); END IF; END $$")
+	if err != nil {
+		log.Fatalf("Failed to create tsvector trigger: %v", err)
+	}
+}
+
 func getDB() *sql.DB {
 	db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/logger?sslmode=disable")
 	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
@@ -63,12 +85,14 @@ func getDB() *sql.DB {
 	createCompositeUniqueIndex(db, "streams", []string{"\"group\"", "stream"}, "group_stream_unique_index")
 	createTable(db, "events", []string{"\"group\" TEXT", "stream TEXT", "timestamp TEXT", "message TEXT"})
 	createIndex(db, "events(\"group\", stream, timestamp)", "group_stream_timestamp_index")
+	createTsVector(db, "events", "message")
 
 	return db
 }
 
 var db *sql.DB
 var meilisearchEventsIndex *meilisearch.Index
+var useMeilisearch = false
 
 func main() {
 	err := godotenv.Load()
@@ -78,28 +102,34 @@ func main() {
 
 	db = getDB()
 
-	meilisearchClient := meilisearch.NewClient(meilisearch.ClientConfig{
-		Host:   os.Getenv("MEILISEARCH_API_URL"),
-		APIKey: os.Getenv("MEILISEARCH_API_KEY"),
-	})
-
-	meilisearchEventsIndex = meilisearchClient.Index("events")
-
 	// deleteAllEvents()
 	// os.Exit(0)
 
-	result, err := meilisearchEventsIndex.GetSettings()
+	useMeilisearch = os.Getenv("USE_MEILISEARCH") == "true"
 
-	if err != nil {
-		log.Printf("Failed to get events index settings: %v", err)
-	} else {
-		if len(result.FilterableAttributes) < 3 || len(result.SortableAttributes) == 0 {
-			println("Updating meilisearch events index settings")
-			meilisearchEventsIndex.UpdateSettings(&meilisearch.Settings{
-				FilterableAttributes: []string{"group", "stream", "timestamp_epoch"},
-				SortableAttributes:   []string{"timestamp_epoch"},
-			})
+	if useMeilisearch {
+		meilisearchClient := meilisearch.NewClient(meilisearch.ClientConfig{
+			Host:   os.Getenv("MEILISEARCH_API_URL"),
+			APIKey: os.Getenv("MEILISEARCH_API_KEY"),
+		})
+
+		meilisearchEventsIndex = meilisearchClient.Index("events")
+
+		result, err := meilisearchEventsIndex.GetSettings()
+
+		if err != nil {
+			log.Printf("Failed to get events index settings: %v", err)
+		} else {
+			if len(result.FilterableAttributes) < 3 || len(result.SortableAttributes) == 0 {
+				println("Updating meilisearch events index settings")
+				meilisearchEventsIndex.UpdateSettings(&meilisearch.Settings{
+					FilterableAttributes: []string{"group", "stream", "timestamp_epoch"},
+					SortableAttributes:   []string{"timestamp_epoch"},
+				})
+			}
 		}
+	} else {
+		// implement for postgres full text search
 	}
 
 	deleteEventsOlderThan(2)
@@ -107,7 +137,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("ui/dist")))
 	mux.HandleFunc("/log", handleMessage)
-	mux.HandleFunc("/index", handleIndexing)
+	if useMeilisearch {
+		mux.HandleFunc("/index", handleIndexing)
+	}
 	println("Starting server at http://localhost:4964")
 	http.ListenAndServe(":4964", mux)
 
@@ -166,21 +198,44 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			var rows *sql.Rows
 			var err error
 			if search != "" {
-				meilisearchEvents, err := meilisearchEventsIndex.Search(search, &meilisearch.SearchRequest{
-					Limit:                 1000, // 1000 is the max limit, as maxTotalHits defaults to 1000 (not sure how to increase that)
-					AttributesToHighlight: []string{"message"},
-					HighlightPreTag:       "<mark>",
-					HighlightPostTag:      "</mark>",
-					// Filter: "group = \"" + group + "\"",
-				})
+				if useMeilisearch {
+					meilisearchEvents, err := meilisearchEventsIndex.Search(search, &meilisearch.SearchRequest{
+						Limit:                 1000, // 1000 is the max limit, as maxTotalHits defaults to 1000 (not sure how to increase that)
+						AttributesToHighlight: []string{"message"},
+						HighlightPreTag:       "<mark>",
+						HighlightPostTag:      "</mark>",
+						// Filter: "group = \"" + group + "\"",
+					})
 
-				if err != nil {
-					log.Fatalf("Failed to execute statement: %v", err)
-				}
+					if err != nil {
+						log.Fatalf("Failed to execute statement: %v", err)
+					}
 
-				streams = []map[string]string{}
-				for _, hit := range meilisearchEvents.Hits {
-					streams = append(streams, map[string]string{"stream": hit.(map[string]interface{})["stream"].(string), "lastEventTime": hit.(map[string]interface{})["timestamp"].(string), "message": hit.(map[string]interface{})["_formatted"].(map[string]interface{})["message"].(string)})
+					streams = []map[string]string{}
+					for _, hit := range meilisearchEvents.Hits {
+						streams = append(streams, map[string]string{"stream": hit.(map[string]interface{})["stream"].(string), "lastEventTime": hit.(map[string]interface{})["timestamp"].(string), "message": hit.(map[string]interface{})["_formatted"].(map[string]interface{})["message"].(string)})
+					}
+				} else {
+					// implement for postgres full text search
+					events, err := db.Query("SELECT stream, timestamp, ts_headline(message, phraseto_tsquery($2), 'StartSel=<mark>, StopSel=</mark>') as message FROM events WHERE \"group\" = $1 AND message_tsvector @@ phraseto_tsquery($2) ORDER BY timestamp DESC LIMIT 1000", group, search)
+
+					if err != nil {
+						log.Fatalf("Failed to execute statement: %v", err)
+					}
+
+					defer events.Close()
+
+					streams = []map[string]string{}
+					for events.Next() {
+						var stream string
+						var lastEventTime string
+						var message string
+						err = events.Scan(&stream, &lastEventTime, &message)
+						if err != nil {
+							log.Fatalf("Failed to scan row: %v", err)
+						}
+						streams = append(streams, map[string]string{"stream": stream, "lastEventTime": lastEventTime, "message": message})
+					}
 				}
 			} else {
 				rows, err = db.Query("SELECT stream, lastEventTime FROM streams WHERE \"group\" = $1 ORDER BY lastEventTime DESC", group)
@@ -281,14 +336,18 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 			log.Fatalf("Failed to parse timestamp: %v", err)
 		}
 
-		meilisearchEventsIndex.AddDocuments([]map[string]interface{}{{
-			"id":              msg.Group + "_" + msg.Stream + "_" + strings.ReplaceAll(strings.ReplaceAll(msg.Timestamp, ":", "_"), ".", "_"),
-			"group":           msg.Group,
-			"stream":          msg.Stream,
-			"timestamp":       msg.Timestamp,
-			"message":         msg.Message,
-			"timestamp_epoch": timestampEpoch.Unix(),
-		}})
+		if useMeilisearch {
+			meilisearchEventsIndex.AddDocuments([]map[string]interface{}{{
+				"id":              msg.Group + "_" + msg.Stream + "_" + strings.ReplaceAll(strings.ReplaceAll(msg.Timestamp, ":", "_"), ".", "_"),
+				"group":           msg.Group,
+				"stream":          msg.Stream,
+				"timestamp":       msg.Timestamp,
+				"message":         msg.Message,
+				"timestamp_epoch": timestampEpoch.Unix(),
+			}})
+		} else {
+			// implement for postgres full text search
+		}
 
 		w.WriteHeader(http.StatusCreated)
 
@@ -298,6 +357,7 @@ func handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// only required if useMeilisearch = true
 func handleIndexing(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		// Start total timing
@@ -413,18 +473,20 @@ func deleteEventsOlderThan(days int) {
 
 	fmt.Printf("DB Query stream deletion took %v\n", time.Since(queryStart))
 
-	// Start timing meilisearchEventsIndex.DeleteDocumentsByFilter
-	indexStart := time.Now()
+	if useMeilisearch {
+		// Start timing meilisearchEventsIndex.DeleteDocumentsByFilter
+		indexStart := time.Now()
 
-	response, err := meilisearchEventsIndex.DeleteDocumentsByFilter(`timestamp_epoch < "` + strconv.Itoa(int(time.Now().AddDate(0, 0, -days).Unix())) + `"`)
+		response, err := meilisearchEventsIndex.DeleteDocumentsByFilter(`timestamp_epoch < "` + strconv.Itoa(int(time.Now().AddDate(0, 0, -days).Unix())) + `"`)
 
-	if err != nil {
-		log.Fatalf("Failed to DeleteDocumentsByFilter: %v", err)
+		if err != nil {
+			log.Fatalf("Failed to DeleteDocumentsByFilter: %v", err)
+		}
+
+		fmt.Printf("Meilisearch response: %v\n", response)
+
+		fmt.Printf("Deleting documents from index took %v\n", time.Since(indexStart))
 	}
-
-	fmt.Printf("Meilisearch response: %v\n", response)
-
-	fmt.Printf("Deleting documents from index took %v\n", time.Since(indexStart))
 
 	fmt.Printf("Total operation took %s\n", time.Since(start))
 }
@@ -449,18 +511,20 @@ func deleteAllEvents() {
 
 	fmt.Printf("DB Query took %v\n", time.Since(queryStart))
 
-	// Start timing meilisearchEventsIndex.DeleteAllDocuments
-	indexStart := time.Now()
+	if useMeilisearch {
+		// Start timing meilisearchEventsIndex.DeleteAllDocuments
+		indexStart := time.Now()
 
-	response, err := meilisearchEventsIndex.DeleteAllDocuments()
+		response, err := meilisearchEventsIndex.DeleteAllDocuments()
 
-	if err != nil {
-		log.Fatalf("Failed to DeleteAllDocuments: %v", err)
+		if err != nil {
+			log.Fatalf("Failed to DeleteAllDocuments: %v", err)
+		}
+
+		fmt.Printf("Meilisearch response: %v\n", response)
+
+		fmt.Printf("Deleting all documents from index took %v\n", time.Since(indexStart))
 	}
-
-	fmt.Printf("Meilisearch response: %v\n", response)
-
-	fmt.Printf("Deleting all documents from index took %v\n", time.Since(indexStart))
 
 	fmt.Printf("Total operation took %s\n", time.Since(start))
 }
