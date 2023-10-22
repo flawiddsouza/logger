@@ -397,7 +397,21 @@ func deleteEventsOlderThan(days int) {
 		log.Fatalf("Failed to execute statement: %v", err)
 	}
 
-	fmt.Printf("DB Query took %v\n", time.Since(queryStart))
+	fmt.Printf("DB Query event deletion took %v\n", time.Since(queryStart))
+
+	queryStart = time.Now()
+
+	stmt, err = db.Prepare("DELETE FROM streams WHERE lastEventTime < $1")
+	if err != nil {
+		log.Fatalf("Failed to prepare statement: %v", err)
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(time.Now().AddDate(0, 0, -days).Format(time.RFC3339))
+	if err != nil {
+		log.Fatalf("Failed to execute statement: %v", err)
+	}
+
+	fmt.Printf("DB Query stream deletion took %v\n", time.Since(queryStart))
 
 	// Start timing meilisearchEventsIndex.DeleteDocumentsByFilter
 	indexStart := time.Now()
