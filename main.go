@@ -74,7 +74,14 @@ func createTsVector(db *sql.DB, table string, column string) {
 }
 
 func getDB() *sql.DB {
-	db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/logger?sslmode=disable")
+	postgresUser := os.Getenv("POSTGRES_USER")
+	postgresPassword := os.Getenv("POSTGRES_PASSWORD")
+	postgresDB := os.Getenv("POSTGRES_DB")
+	postgresHost := os.Getenv("POSTGRES_HOST")
+	postgresPort := os.Getenv("POSTGRES_PORT")
+
+	postgresConnStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", postgresUser, postgresPassword, postgresHost, postgresPort, postgresDB)
+	db, err := sql.Open("postgres", postgresConnStr)
 	// on why WAL: https://www.golang.dk/articles/go-and-sqlite-in-the-cloud
 	//db, err := sql.Open("sqlite3", "./logger.db?_journal=WAL")
 	if err != nil {
