@@ -1,0 +1,48 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '22'
+
+    - name: Install UI dependencies
+      working-directory: ui
+      run: npm install
+
+    - name: Build UI
+      working-directory: ui
+      run: npm run build
+
+    - name: Build Go application
+      run: go build -o dist/logger
+
+    - name: Create Release Archive
+      run: |
+        mkdir -p dist/release/logger-linux/ui
+        cp dist/logger dist/release/logger-linux/
+        cp -r ui/dist dist/release/logger-linux/ui/
+        cd dist/release
+        zip -r ../logger-linux.zip logger-linux
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/logger-linux.zip
