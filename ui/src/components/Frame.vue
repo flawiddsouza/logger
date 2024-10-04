@@ -81,7 +81,7 @@ async function getLogGroups() {
     console.log('Fetching log groups')
     logGroups.value = []
     loadingLogGroups.value = true
-    const response = await fetch('/log')
+    const response = await fetch('log')
     const data = await response.json()
     logGroups.value = data
     loadingLogGroups.value = false
@@ -96,7 +96,7 @@ async function getLogStreams() {
     console.log('Fetching log streams')
     logStreams.value = []
     loadingLogStreams.value = true
-    const response = await fetch(`/log?group=${selectedLogGroup.value}&search=${search.value}`)
+    const response = await fetch(`log?group=${selectedLogGroup.value}&search=${search.value}`)
     const data = await response.json()
     logStreams.value = data
     loadingLogStreams.value = false
@@ -107,7 +107,7 @@ async function getLogs() {
     console.log('Fetching logs')
     logs.value = []
     loadingLogs.value = true
-    const response = await fetch(`/log?group=${selectedLogGroup.value}&stream=${selectedLogStream.value}`)
+    const response = await fetch(`log?group=${selectedLogGroup.value}&stream=${selectedLogStream.value}`)
     const data = await response.json()
     logs.value = data
     loadingLogs.value = false
@@ -122,7 +122,7 @@ function setQueryParams() {
     Object.keys(queryObject).forEach(key => queryObject[key] === undefined && delete queryObject[key])
 
     const queryParams = new URLSearchParams(queryObject).toString()
-    history.pushState(null, null, queryParams.length ? `?${queryParams}` : '/')
+    history.pushState(null, null, queryParams.length ? `?${queryParams}` : window.location.pathname)
 }
 
 async function loadQueryParams() {
